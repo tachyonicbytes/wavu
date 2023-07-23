@@ -1,0 +1,7 @@
+#+title: WebAssembly Version Updater
+
+A very early version of what I wish to become the equivalent of jsvu for WebAssembly runtimes.
+
+This is very early work, and it contains all the signs of early work, including commented code, missing features, hardcoded paths.
+
+For now, it's a nice tool do download the latest versions of four WebAssembly runtimes: =wasmer=, =wasmtime=, =wasm3=, =wazero=.
