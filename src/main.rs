@@ -49,16 +49,104 @@ static JAVASCRIPTCORE_RELEASES: &str = "";
 /// Cli struct
 #[derive(Parser)]
 struct Cli {
-    /// The pattern to look for
-    arch: String, // The architecture of your system
-    /// The path to the file to read
-    runtimes: Vec<String>, // Runtimes to install
+    /// Runtimes to install
+    runtimes: Vec<String>,
 }
 
 /// Config struct
 struct Config {
     /// Where .wavu should reside
     home_dir: String,
+}
+
+/// The operation systems enum
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum OperatingSystem {
+    Linux,
+    Darwin,
+    Windows,
+}
+
+impl ToString for OperatingSystem {
+    fn to_string(&self) -> String {
+        match &self {
+            OperatingSystem::Darwin => "darwin".to_string(),
+            OperatingSystem::Windows => "windows".to_string(),
+            OperatingSystem::Linux => "linux".to_string(),
+        }
+    }
+}
+
+impl Default for OperatingSystem {
+    fn default() -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            OperatingSystem::Darwin
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            OperatingSystem::Linux
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            OperatingSystem::Windows
+        }
+    }
+}
+
+/// The cpu architectures enum
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum Architecture {
+    Amd64,
+    I386,
+    Arm32v6,
+    Arm32v7,
+    Arm64v8,
+    Ppc64le,
+}
+
+impl ToString for Architecture {
+    fn to_string(&self) -> String {
+        match &self {
+            Architecture::Amd64 => "amd64".to_string(),
+            Architecture::I386 => "i386".to_string(),
+            Architecture::Arm32v6 => "arm32v6".to_string(),
+            Architecture::Arm32v7 => "arm32v7".to_string(),
+            Architecture::Arm64v8 => "arm64v8".to_string(),
+            Architecture::Ppc64le => "ppc64le".to_string(),
+        }
+    }
+}
+
+impl Default for Architecture {
+    fn default() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Architecture::Amd64
+        }
+
+        #[cfg(target_arch = "x86")]
+        {
+            Architecture::I386
+        }
+
+        #[cfg(target_arch = "arm")]
+        {
+            Architecture::Arm32v7
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Architecture::Arm64v8
+        }
+
+        #[cfg(target_arch = "powerpc64")]
+        {
+            Architecture::Ppc64le
+        }
+    }
 }
 
 // cp source/* target/
@@ -263,12 +351,15 @@ fn install_all(runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))>) {
     });
 
     mp.println("Finished installing all runtimes!").unwrap();
-
 }
 
 fn main() {
     let args = Cli::parse();
-    println!("{}, {:?}", args.arch, args.runtimes);
+
+    let os = OperatingSystem::default().to_string();
+    let arch = Architecture::default().to_string();
+
+    info!("{:?}", args.runtimes);
 
     let config = Config {
         home_dir: env::var("HOME").expect("Home directory not accessible"),
@@ -277,10 +368,15 @@ fn main() {
     // mkdir -p ~/.wavu/bin/
     create_dir_all(format!("{}/.wavu/bin/", config.home_dir)).expect("Could create the directory");
 
-    match args.arch.as_ref() {
-        "linux64" => println!("Arch is linux64"),
-        "darwin64" => panic!("TODO: darwin aarch64"),
-        "windows64" => panic!("TODO: windows64"),
+    match os.as_ref() {
+        "linux" => println!("OS is linux"),
+        "darwin" => panic!("TODO: darwin aarch64"),
+        "windows" => panic!("TODO: windows64"),
+        _ => panic!("Not actually implemented"),
+    }
+
+    match arch.as_ref() {
+        "amd64" => println!("Arch is AMD64"),
         _ => panic!("Not actually implemented"),
     }
 
