@@ -15,7 +15,8 @@ use indicatif::MultiProgress;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 use std::collections::HashMap;
-use std::env;
+use std::{env, fs};
+use std::path::PathBuf;
 use std::thread;
 use std::{
     fs::{create_dir_all, File},
@@ -24,6 +25,7 @@ use std::{
 };
 use tar::Archive;
 use xz2::read::XzDecoder;
+use serde::{Serialize, Deserialize};
 
 // Pure WASM runtimes
 static WASMER_RELEASES: &str = "https://github.com/wasmerio/wasmer/releases";
@@ -54,9 +56,12 @@ struct Cli {
 }
 
 /// Config struct
+#[derive(Serialize, Deserialize)]
 struct Config {
-    /// Where .wavu should reside
-    home_dir: String,
+    /// Where `.wavu` should reside
+    home_dir: PathBuf,
+    /// Where wavu should keep its caches
+    cache_dir: PathBuf,
 }
 
 /// The operation systems enum
@@ -166,15 +171,16 @@ fn download_file(url: &str, target: &str) {
     // create_dir_all("./runtimes/wasmer/");
 
     info!("Starting the download");
-    let mut resp = reqwest::blocking::get(url).expect(&format!("Could not download: {}", url));
+    let resp = reqwest::blocking::get(url).expect(&format!("Could not download: {}", url));
     let mut file = File::create(target).expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
     file.write_all(&bytes);
 }
 
 // Runtimes
-fn download_wasmer(pb: &ProgressBar) {
+fn download_wasmer(config: &Config, pb: &ProgressBar) {
     let message_prefix: &str = "Downloading wasmer";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasmer/");
 
     pb.set_message(message_prefix);
 
@@ -185,13 +191,13 @@ fn download_wasmer(pb: &ProgressBar) {
         "{message_prefix}{}",
         ": Creating the target directory"
     ));
-    create_dir_all("./runtimes/wasmer/").unwrap();
+    create_dir_all(download_dir).unwrap();
 
     pb.set_message(format!("{message_prefix}: getting {url}/{binary}"));
 
     let resp =
         reqwest::blocking::get(format!("{url}/{binary}")).expect("Could not download wasmer");
-    let mut file = File::create("./runtimes/wasmer/wasmer.tar.gz").expect("Could not open file");
+    let mut file = File::create(download_dir.join("wasmer.tar.gz")).expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
 
     pb.set_message(format!("{message_prefix}: writing to disk"));
@@ -200,136 +206,157 @@ fn download_wasmer(pb: &ProgressBar) {
     pb.finish_with_message("Downloaded wasmer");
 }
 
-fn install_wasmer(pb: &ProgressBar) {
+fn install_wasmer(config: &Config, pb: &ProgressBar) {
     let message_prefix: &str = "Installing wasmer";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasmer");
+    let install_dir = &config.home_dir.join(".wavu/bin/wasmer");
 
     pb.set_message(message_prefix);
 
     let home: String = env::var("HOME").expect("Could not get the $HOME directory");
-    let path = "./runtimes/wasmer/wasmer.tar.gz";
+    let path = download_dir.join("wasmer.tar.gz");
 
     pb.set_message(format!("{message_prefix}: Unzipping the archive"));
     let tar_gz = File::open(path).expect("Could not open the tarball");
     let tar = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(tar);
-    create_dir_all("./runtimes/wasmtime/").expect("No error creating the directory");
+    create_dir_all(install_dir).expect("No error creating the directory");
     archive
-        .unpack("./runtimes/wasmtime/")
+        .unpack(install_dir)
         .expect("Could not unpack tarball");
 
     pb.set_message(format!("{message_prefix}: Copying the contents"));
-    copy_directory_contents("./runtimes/wasmtime/bin", &format!("{home}/.wavu/bin/"));
+    copy_directory_contents(download_dir.to_str().unwrap(), install_dir.to_str().unwrap());
 
     pb.finish_with_message("Installed wasmer");
 }
 
-fn download_wasmtime(pb: &ProgressBar) {
+fn download_wasmtime(config: &Config, pb: &ProgressBar) {
     let message_prefix = "Downloading wasmtime";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasmtime/");
+    let install_dir = &config.home_dir.join(".wavu/bin/wasmtime/");
+
     pb.set_message(message_prefix);
 
     let url: &str = WASMTIME_RELEASES;
     let binary = "download/v11.0.0/wasmtime-v11.0.0-x86_64-linux.tar.xz";
 
     info!("Creating the target directory");
-    create_dir_all("./runtimes/wasmtime/").expect("No error creating the directory");
+    create_dir_all(download_dir).expect("No error creating the directory");
 
     pb.set_message(format!("{message_prefix}: getting {url}/{binary}"));
     let resp =
         reqwest::blocking::get(format!("{url}/{binary}")).expect("Could not download wasmtime");
     let mut file =
-        File::create("./runtimes/wasmtime/wasmtime.tar.xz").expect("Could not open file");
+        File::create(download_dir.join("wasmtime.tar.xz")).expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
     file.write_all(&bytes).expect("No error writing the file");
 
     pb.finish_with_message("Downloaded wasmtime");
 }
 
-fn install_wasmtime(pb: &ProgressBar) {
+fn install_wasmtime(config: &Config, pb: &ProgressBar) {
     let message_prefix = "Installing wasmtime";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasmtime");
+    let install_dir = &config.home_dir.join(".wavu/bin/wasmtime");
 
-    let home: String = env::var("HOME").expect("Could not get the $HOME directory");
-    let path = "./runtimes/wasmtime/wasmtime.tar.xz";
+    let path = download_dir.join("wasmtime.tar.xz");
 
     pb.set_message(format!("{message_prefix}: Unzipping the archive"));
     let tar_xz = File::open(path).expect("Could not open the tarball");
     let tar = XzDecoder::new(tar_xz);
     let mut archive = Archive::new(tar);
-    create_dir_all("./runtimes/wasmtime/").unwrap();
+    create_dir_all(download_dir.join("wasmtime/")).unwrap();
     archive
         .unpack("./runtimes/wasmtime/")
         .expect("Could not unpack tarball");
 
     pb.set_message(format!("{message_prefix}: Copying the contents"));
-    copy_directory_contents("./runtimes/wasmtime/", &format!("{home}/.wavu/bin/"));
+    copy_directory_contents(download_dir.to_str().unwrap(), install_dir.to_str().unwrap());
 
     pb.finish_with_message("Installed wasmtime");
 }
 
-fn download_wasm3(pb: &ProgressBar) {
+fn download_wasm3(config: &Config, pb: &ProgressBar) {
     pb.set_message("Downloading wasm3");
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasm3/");
+    let install_dir = &config.home_dir.join(".wavu/bin/wasm3/");
 
     let url: &str = WASM3_RELEASES;
     let binary = "download/v0.5.0/wasm3-linux-x64.elf";
 
     info!("Creating the target directory");
-    create_dir_all("./runtimes/wasm3/bin/").unwrap();
+    create_dir_all(download_dir.join("bin")).unwrap();
 
     info!("Starting the download");
     info!("The actual url: {}", format!("{url}/{binary}"));
     let resp = reqwest::blocking::get(format!("{url}/{binary}")).expect("Could not download wasm3");
-    let mut file = File::create("./runtimes/wasm3/bin/wasm3").expect("Could not open file");
+    let mut file = File::create(download_dir.join("wasm3")).expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
     file.write_all(&bytes).unwrap();
 
     pb.finish_with_message("Downloaded wasm3");
 }
 
-fn install_wasm3(pb: &ProgressBar) {
-    pb.finish_with_message("Installing wasm3: wasm3 does not require installation");
+fn install_wasm3(config: &Config, pb: &ProgressBar) {
+    pb.set_message("Installing wasm3");
+
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wasm3/");
+    let install_dir = &config.home_dir.join(".wavu/bin/wasm3/");
+
+    copy_directory_contents(download_dir.to_str().unwrap(), install_dir.to_str().unwrap());
+    pb.finish_with_message("Installed wasm3");
 }
 
-fn download_wazero(pb: &ProgressBar) {
+fn download_wazero(config: &Config, pb: &ProgressBar) {
     let message_prefix: &str = "Downloading wazero";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wazero/");
+    let install_dir = &config.home_dir.join(".wavu/bin/wazero/");
+
     pb.set_message(message_prefix);
 
     let url: &str = WAZERO_RELEASES;
     let binary = "download/v1.3.0/wazero_1.3.0_linux_amd64.tar.gz";
 
     info!("Creating the target directory");
-    create_dir_all("./runtimes/wazero/").unwrap();
+    create_dir_all(download_dir).unwrap();
 
     pb.set_message(format!("{message_prefix}: getting {url}/{binary}"));
     let resp = reqwest::blocking::get(format!("{url}/{binary}")).expect("Could not download wasm3");
-    let mut file = File::create("./runtimes/wazero/wazero.tar.gz").expect("Could not open file");
+
+    let mut file = File::create(download_dir.join("wazero.tar.gz")).expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
     file.write_all(&bytes).unwrap();
 
     pb.finish_with_message("Downloaded wazero");
 }
 
-fn install_wazero(pb: &ProgressBar) {
+fn install_wazero(config: &Config, pb: &ProgressBar) {
     let message_prefix: &str = "Installing wazero";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/wazero/");
+    let install_dir = &config.home_dir.join(".wavu/bin/wazero/");
+
     pb.set_message(message_prefix);
 
     let home: String = env::var("HOME").expect("Could not get the $HOME directory");
-    let path = "./runtimes/wazero/wazero.tar.gz";
+    let path = download_dir.join("wazero.tar.gz");
 
     pb.set_message(format!("{message_prefix}: Unzipping the archive"));
     let tar_xz = File::open(path).expect("Could not open the tarball");
     let tar = GzDecoder::new(tar_xz);
     let mut archive = Archive::new(tar);
-    create_dir_all("./runtimes/wazero/").unwrap();
+    create_dir_all(download_dir).unwrap();
     archive
-        .unpack("./runtimes/wazero/")
+        .unpack(download_dir)
         .expect("Could not unpack tarball");
 
     pb.set_message(format!("{message_prefix}: Copying the contents"));
-    copy_directory_contents("./runtimes/wazero/", &format!("{home}/.wavu/bin/"));
+    copy_directory_contents(download_dir.to_str().unwrap(), install_dir.to_str().unwrap());
 
-    pb.finish_with_message(format!("Installed wazero"));
+    pb.finish_with_message("Installed wazero");
 }
 
-fn install_all(runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))>) {
+fn install_all(config: &Config, runtimes: HashMap<&str, (fn(&Config, &ProgressBar), fn(&Config, &ProgressBar))>) {
     let mp = MultiProgress::new();
     let pstyle = ProgressStyle::default_spinner()
         .template("{spinner:.green} {wide_msg}")
@@ -344,8 +371,8 @@ fn install_all(runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))>) {
                 pb.set_style(pstyle.clone());
                 pb.enable_steady_tick(Duration::from_millis(80));
 
-                download(&pb);
-                install(&pb);
+                download(config, &pb);
+                install(config, &pb);
             }
         });
     });
@@ -359,14 +386,25 @@ fn main() {
     let os = OperatingSystem::default().to_string();
     let arch = Architecture::default().to_string();
 
-    info!("{:?}", args.runtimes);
+    println!("{:?}", args.runtimes);
 
-    let config = Config {
-        home_dir: env::var("HOME").expect("Home directory not accessible"),
+    // The default config
+    let mut config = Config {
+        home_dir: dirs::home_dir().expect("Home dir to be present"),
+        cache_dir: dirs::cache_dir().expect("Cache dir to be present"),
     };
 
-    // mkdir -p ~/.wavu/bin/
-    create_dir_all(format!("{}/.wavu/bin/", config.home_dir)).expect("Could create the directory");
+    if config.home_dir.join(".wavu/wavu.conf.json").is_file() {
+        let json_string = fs::read_to_string(config.home_dir.join(".wavu/wavu.conf.json")).expect("Failed to read the config.");
+        config = serde_json::from_str(&json_string).expect("Failed to parse the config");
+    }
+    // The config should be loaded correctly after this point
+
+    // mkdir -p $HOME_DIR/.wavu/bin/
+    create_dir_all(config.home_dir.join(".wavu/bin/")).expect("Directory to be creted");
+
+    // mkdir -p $CACHE_DIR/.wavu/runtimes/
+    create_dir_all(config.cache_dir.join(".wavu/runtimes/")).expect("Directory to be creted");
 
     match os.as_ref() {
         "linux" => println!("OS is linux"),
@@ -380,7 +418,7 @@ fn main() {
         _ => panic!("Not actually implemented"),
     }
 
-    let mut runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))> = HashMap::new();
+    let mut runtimes: HashMap<&str, (fn(&Config, &ProgressBar), fn(&Config, &ProgressBar))> = HashMap::new();
 
     for runtime in args.runtimes.iter() {
         match runtime.as_ref() {
@@ -402,5 +440,5 @@ fn main() {
         }
     }
 
-    install_all(runtimes);
+    install_all(&config, runtimes);
 }
