@@ -14,6 +14,7 @@ use fs_extra::dir::{copy, CopyOptions};
 use indicatif::MultiProgress;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
+use std::collections::HashMap;
 use std::env;
 use std::thread;
 use std::{
@@ -51,8 +52,7 @@ struct Cli {
     /// The pattern to look for
     arch: String, // The architecture of your system
     /// The path to the file to read
-    runtime: String, // Runtime to install
-                     // let mut array: Vec<String>;  // TODO: In the future, we want to pass a list of runtimes
+    runtimes: Vec<String>, // Runtimes to install
 }
 
 /// Config struct
@@ -124,7 +124,7 @@ fn install_wasmer(pb: &ProgressBar) {
     let tar_gz = File::open(path).expect("Could not open the tarball");
     let tar = GzDecoder::new(tar_gz);
     let mut archive = Archive::new(tar);
-    create_dir_all("./runtimes/wasmtime/");
+    create_dir_all("./runtimes/wasmtime/").expect("No error creating the directory");
     archive
         .unpack("./runtimes/wasmtime/")
         .expect("Could not unpack tarball");
@@ -132,7 +132,7 @@ fn install_wasmer(pb: &ProgressBar) {
     pb.set_message(format!("{message_prefix}: Copying the contents"));
     copy_directory_contents("./runtimes/wasmtime/bin", &format!("{home}/.wavu/bin/"));
 
-    pb.finish_with_message(format!("Installed wasmer"));
+    pb.finish_with_message("Installed wasmer");
 }
 
 fn download_wasmtime(pb: &ProgressBar) {
@@ -143,17 +143,17 @@ fn download_wasmtime(pb: &ProgressBar) {
     let binary = "download/v11.0.0/wasmtime-v11.0.0-x86_64-linux.tar.xz";
 
     info!("Creating the target directory");
-    create_dir_all("./runtimes/wasmtime/");
+    create_dir_all("./runtimes/wasmtime/").expect("No error creating the directory");
 
     pb.set_message(format!("{message_prefix}: getting {url}/{binary}"));
-    let mut resp =
+    let resp =
         reqwest::blocking::get(format!("{url}/{binary}")).expect("Could not download wasmtime");
     let mut file =
         File::create("./runtimes/wasmtime/wasmtime.tar.xz").expect("Could not open file");
     let bytes = resp.bytes().expect("Could not decode the file downloaded");
-    file.write_all(&bytes);
+    file.write_all(&bytes).expect("No error writing the file");
 
-    pb.finish_with_message(format!("Downloaded wasmtime"));
+    pb.finish_with_message("Downloaded wasmtime");
 }
 
 fn install_wasmtime(pb: &ProgressBar) {
@@ -241,104 +241,70 @@ fn install_wazero(pb: &ProgressBar) {
     pb.finish_with_message(format!("Installed wazero"));
 }
 
-fn download_all() {
+fn install_all(runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))>) {
     let mp = MultiProgress::new();
     let pstyle = ProgressStyle::default_spinner()
         .template("{spinner:.green} {wide_msg}")
         .expect("ProgresStyle::template direct input to be correct");
 
-    mp.println("starting!").unwrap();
+    mp.println("Starting downloading runtimes!").unwrap();
 
     thread::scope(|scope| {
         scope.spawn(|| {
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            download_wasm3(&pb);
+            for (_, (download, install)) in runtimes.iter() {
+                let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
+                pb.set_style(pstyle.clone());
+                pb.enable_steady_tick(Duration::from_millis(80));
 
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            install_wasm3(&pb)
-        });
-        scope.spawn(|| {
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            download_wasmer(&pb);
-
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            install_wasmer(&pb);
-        });
-        scope.spawn(|| {
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            download_wasmtime(&pb);
-
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            install_wasmtime(&pb);
-        });
-        scope.spawn(|| {
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            download_wazero(&pb);
-
-            let pb = mp.insert_from_back(0, ProgressBar::new_spinner());
-            pb.set_style(pstyle.clone());
-            pb.enable_steady_tick(Duration::from_millis(80));
-            install_wazero(&pb);
+                download(&pb);
+                install(&pb);
+            }
         });
     });
+
+    mp.println("Finished installing all runtimes!").unwrap();
+
 }
 
 fn main() {
-    download_all();
-    return;
-
     let args = Cli::parse();
-    info!("{}, {}", args.arch, args.runtime);
+    println!("{}, {:?}", args.arch, args.runtimes);
 
     let config = Config {
         home_dir: env::var("HOME").expect("Home directory not accessible"),
     };
 
     // mkdir -p ~/.wavu/bin/
-    create_dir_all(format!("{}/.wavu/bin/", config.home_dir));
+    create_dir_all(format!("{}/.wavu/bin/", config.home_dir)).expect("Could create the directory");
 
     match args.arch.as_ref() {
-        "linux64" => println!("TODO: Good, but implement this arch"),
-        "darwin64" => println!("TODO: Good, but implement macos (darwin)"),
-        "windows64" => println!("TODO: Good, but implement windows 64"),
+        "linux64" => println!("Arch is linux64"),
+        "darwin64" => panic!("TODO: darwin aarch64"),
+        "windows64" => panic!("TODO: windows64"),
         _ => panic!("Not actually implemented"),
     }
 
-    match args.runtime.as_ref() {
-        "wasmer" => {
-            info!("TODO: Good, but implement this runtime");
-            // download_wasmer();
-            // install_wasmer();
+    let mut runtimes: HashMap<&str, (fn(&ProgressBar), fn(&ProgressBar))> = HashMap::new();
+
+    for runtime in args.runtimes.iter() {
+        match runtime.as_ref() {
+            "wasm3" => {
+                runtimes.insert("wasm3", (download_wasm3, install_wasm3));
+            }
+            "wasmer" => {
+                runtimes.insert("wasmer", (download_wasmer, install_wasmer));
+            }
+            "wasmtime" => {
+                runtimes.insert("wasmtime", (download_wasmtime, install_wasmtime));
+            }
+            "wazero" => {
+                runtimes.insert("wazero", (download_wazero, install_wazero));
+            }
+            runtime => {
+                panic!("Unknown runtime '{}'", runtime);
+            }
         }
-        "wasmtime" => {
-            info!("TODO: Good, but implement this runtime");
-            // download_wasmtime();
-            // install_wasmtime();
-        }
-        "wasm3" => {
-            info!("TODO: Good, but implement wasm3");
-            // download_wasm3();
-            // install_wasm3();
-        }
-        "wazero" => {
-            info!("TODO: Good, but implement wazero");
-            // download_wazero();
-            // install_wazero();
-        }
-        _ => panic!("Unknown runtime"),
     }
+
+    install_all(runtimes);
 }
