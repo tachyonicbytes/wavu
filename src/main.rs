@@ -25,12 +25,13 @@ use std::{
 };
 use tar::Archive;
 use xz2::read::XzDecoder;
+use zip::read::ZipArchive;
 
 // Pure WASM runtimes
 static WASMER_RELEASES: &str = "https://github.com/wasmerio/wasmer/releases";
 static WASM3_RELEASES: &str = "https://github.com/wasm3/wasm3/releases";
 static WASMTIME_RELEASES: &str = "https://github.com/bytecodealliance/wasmtime/releases";
-static WAZERO_RELEASES: &str = "https://github.com/tetratelabs/wazero/releases/";
+static WAZERO_RELEASES: &str = "https://github.com/tetratelabs/wazero/releases";
 static TIMECRAFT_RELEASES: &str = "";
 static WASMEDGE_RELEASES: &str = "";
 
@@ -41,7 +42,7 @@ static LIBWASM_RELEASES: &str = "";
 
 // JavaScript runtimes containing WASM runtimes
 // TODO: best to use jsvu here and just wrap that up.
-static SPIDERMONKEY_RELEASES: &str = "";
+static SPIDERMONKEY_RELEASES: &str = "https://archive.mozilla.org/pub/firefox/releases";
 static V8_RELEASES: &str = "";
 static JAVASCRIPTCORE_RELEASES: &str = "";
 
@@ -74,7 +75,7 @@ fn copy_directory_contents(source: &str, target: &str) {
 
 // download_file("https://github.com/wasmerio/wasmer/releases/download/v4.0.0/wasmer-linux-amd64.tar.gz", "./runtimes/test/wasmer.tar.gz");
 // wget url -O target, but it's the caller's job to create the target directory.
-#[doc = "download a file to a target"]
+#[doc = "Download a file to a target"]
 fn download_file(url: &str, target: &str) {
     println!("Downloading {}", url);
 
@@ -268,6 +269,48 @@ fn install_wazero(config: &Config, pb: &ProgressBar) {
     pb.finish_with_message("Installed wazero");
 }
 
+fn download_spidermonkey(config: &Config, pb: &ProgressBar) {
+    let message_prefix: &str = "Downloading spidermonkey";
+    pb.set_message(message_prefix);
+
+    let release: &str = SPIDERMONKEY_RELEASES;
+    let binary = "116.0/jsshell/jsshell-linux-x86_64.zip";
+    let url: String = format!("{release}/{binary}");
+    let url = url.as_str();
+
+    pb.set_message(format!("{message_prefix}: Creating the target directory"));
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/spidermonkey/");
+    create_dir_all(download_dir).unwrap();
+
+    pb.set_message(format!("{message_prefix}: getting {url}/{binary}"));
+    download_file(url, download_dir.join("spidermonkey.zip").to_str().unwrap());
+
+    pb.finish_with_message("Downloaded spidermonkey");
+}
+
+fn install_spidermonkey(config: &Config, pb: &ProgressBar) {
+    let message_prefix: &str = "Installing spidermonkey";
+    let download_dir = &config.cache_dir.join(".wavu/runtimes/spidermonkey/");
+    let install_dir = &config.home_dir.join(".wavu/bin/spidermonkey/");
+
+    pb.set_message(message_prefix);
+    let path = download_dir.join("spidermonkey.zip");
+
+    pb.set_message(format!("{message_prefix}: Unzipping the archive"));
+
+    let zip = File::open(path).expect("Could not open the tarball");
+    let mut archive = ZipArchive::new(zip).unwrap();
+    archive.extract(install_dir).unwrap();
+
+    pb.set_message(format!("{message_prefix}: Copying the contents"));
+    copy_directory_contents(
+        download_dir.to_str().unwrap(),
+        install_dir.to_str().unwrap(),
+    );
+
+    pb.finish_with_message("Installed spidermonkey");
+}
+
 fn install_all(
     config: &Config,
     runtimes: HashMap<&str, (fn(&Config, &ProgressBar), fn(&Config, &ProgressBar))>,
@@ -351,6 +394,12 @@ fn main() {
             }
             "wazero" => {
                 runtimes.insert("wazero", (download_wazero, install_wazero));
+            }
+            "spidermonkey" => {
+                runtimes.insert(
+                    "spidermonkey",
+                    (download_spidermonkey, install_spidermonkey),
+                );
             }
             runtime => {
                 panic!("Unknown runtime '{}'", runtime);

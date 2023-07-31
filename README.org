@@ -11,5 +11,5 @@ For now, it's a nice tool do download the latest versions of four WebAssembly ru
 Run the binary with the names of the runtimes you want to install:
 
 #+begin_src bash
-./wavu wasm3 wasmer wasmtime wazero
+./wavu wasm3 wasmer wasmtime wazero spidermonkey
 #+end_src
